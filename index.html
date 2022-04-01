@@ -646,10 +646,10 @@
 
         let q1 = prompt("Would you like to change the gamepad settings?");
         if (q1 && q1.toLowerCase() !== "n" && q1.toLowerCase() !== "no") {
-          w = Number(prompt("Enter a width for the gamepad:")) || 9;
-          h = Number(prompt("Enter a height for the gamepad:")) || 11;
-          a = prompt("Enter a number of anchor points for the gamepad:");
-          a = ((a !== "" && a !== null && !isNaN(Number(a))) ? Number(a) : 3);
+          w = Math.max(Math.min(Number(prompt("Enter a width for the gamepad (9 default):")) || 9, 100), 1);
+          h = Math.max(Math.min(Number(prompt("Enter a height for the gamepad (11 default):")) || 11, 100), 1);
+          a = prompt("Enter a number of anchor points for the gamepad (3 default):");
+          a = Math.max(Math.min(((a !== "" && a !== null && !isNaN(Number(a))) ? Number(a) : 3), Math.min(w, h) - 1), 0);
 
           let q2 = prompt("Would you like to set advanced settings?");
           if (q2 && q2.toLowerCase() !== "n" && q2.toLowerCase() !== "no") {
