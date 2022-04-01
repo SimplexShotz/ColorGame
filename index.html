@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html>
+  <head>
+
+    <title>Color Game</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit&display=swap" rel="stylesheet">
+
+    <!-- Polyfill for mobile drag and drop -->
+    <script src="http://bernardo-castilho.github.io/DragDropTouch/DragDropTouch.js"></script>
+
+    <style>
+
+      body {
+        display: flex;
+        background-color: rgb(230, 230, 230);
+        width: 100vw;
+        height: 100vh;
+        margin: 0px;
+        padding: 0px;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        font-family: "Outfit";
+        overflow: hidden;
+      }
+
+      #gamepad {
+        display: flex;
+        flex-wrap: wrap;
+        background-color: rgb(255, 255, 255);
+        width: calc(100vw - 50px);
+        height: calc(100vh - 120px);
+        margin-bottom: 20px;
+      }
+
+      .button-container {
+        display: flex;
+      }
+
+      .button {
+        background-color: rgb(5, 65, 100);
+        color: rgb(255, 255, 255);
+        padding: 10px 20px;
+        margin: 0px 10px;
+        border-radius: 5px;
+        font-size: 2em;
+      }
+
+      .anchor {
+        background-color: rgb(0, 0, 0);
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+      }
+
+      .tile {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        transition: top 0.5s, left 0.5s;
+      }
+
+    </style>
+  </head>
+  <body>
+    <div id="gamepad"></div>
+    <div class="button-container">
+      <div class="button" id="newGame">New Game</div>
+      <div class="button" id="autoSolve">Auto Solve</div>
+    </div>
+    <script type="module">
+
+      // Import the functions you need from the SDKs you need
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js";
+      import { getDatabase, set, get, ref, query, onValue, child, push, remove } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
+
+      // Your web app's Firebase configuration
+      const firebaseConfig = {
+        apiKey: "AIzaSyAt8autgppD_CRsjmP5RAvlf5OVOeJcEzA",
+        authDomain: "color-game-d96bb.firebaseapp.com",
+        databaseURL: "https://color-game-d96bb-default-rtdb.firebaseio.com",
+        projectId: "color-game-d96bb",
+        storageBucket: "color-game-d96bb.appspot.com",
+        messagingSenderId: "401739484029",
+        appId: "1:401739484029:web:6df650c71a28891e1d1a14"
+      };
+
+      // Initialize Firebase
+      const app = initializeApp(firebaseConfig);
+      const db = getDatabase(app);
+
+      let dragging, gamepad = {};
+      let animationBuffer = [];
+      let uid = new Date().getTime() + "_" + Math.floor(Math.random() * 1000000);
+      let appliedChanges = [];
+      let gamepadCheckDelay = 0;
+      let lastMove = 0;
+
+      let v = 1.1;
+
+      window.addEventListener("load", async function() {
+
+        let version = await getData("version", function(err) { console.error(err); });
+        if (version !== v) {
+          location.reload(true);
+        }
+
+        onValue(ref(db, "version"), (snapshot) => {
+          const version = snapshot.val();
+          if (version !== v) {
+            location.reload(true);
+          }
+        });
+
+        let changesObj = await getData("games/default/changes", function(err) { console.error(err); });
+        for (let i in changesObj) {
+          appliedChanges.push(i);
+        }
+
+        onValue(ref(db, "games/default/changes"), (snapshot) => {
+          const changes = snapshot.val();
+          handleChanges(changes);
+        });
+
+        loadGamepad();
+
+        setInterval(async function() {
+
+          let localTilesData = getTiles();
+          let realTilesData = await getData("games/default/gamepad/tiles", function(err) { console.error(err); });
+
+          let i;
+          for (i = 0; i < localTilesData.length; i++) {
+            if (localTilesData[i] !== realTilesData[i]) {
+              gamepadCheckDelay++;
+              break;
+            }
+          }
+
+          if (i === localTilesData.length) {
+            gamepadCheckDelay = 0;
+          }
+
+          if (gamepadCheckDelay >= 4) {
+            loadGamepad();
+            gamepadCheckDelay = 0;
+          }
+
+        }, 500);
+
+      });
+
+      async function loadGamepad(firstLoad) {
+
+        if (!firstLoad)
+          gamepad = await getData("games/default/gamepad", function(err) { console.error(err); });
+
+        document.getElementById("gamepad").innerHTML = "";
+
+        let div, col;
+        for (let i = 0; i < gamepad.tiles.length; i++) {
+          let x = Number(gamepad.tiles[i].split("-")[1]);
+          let y = Number(gamepad.tiles[i].split("-")[2]);
+
+          div = document.createElement("div");
+          switch(gamepad.colorMode) {
+            case "gradient":
+              col = [
+                getColorAtPos(gamepad.colorArray, { x: x + 0.5, y: y + 0.5, w: gamepad.w, h: gamepad.h }),
+                getColorAtPos(gamepad.colorArray, { x: x, y: y, w: gamepad.w, h: gamepad.h }),
+                getColorAtPos(gamepad.colorArray, { x: x + 1, y: y, w: gamepad.w, h: gamepad.h }),
+                getColorAtPos(gamepad.colorArray, { x: x, y: y + 1, w: gamepad.w, h: gamepad.h }),
+                getColorAtPos(gamepad.colorArray, { x: x + 1, y: y + 1, w: gamepad.w, h: gamepad.h })
+              ];
+              div.innerHTML = `<div class="tile" id="tile-${x}-${y}" style="background: linear-gradient(to top left, rgb(${col[4].r}, ${col[4].g}, ${col[4].b}), rgba(${col[0].r}, ${col[0].g}, ${col[0].b}, 0), rgb(${col[1].r}, ${col[1].g}, ${col[1].b})), linear-gradient(to top right, rgb(${col[3].r}, ${col[3].g}, ${col[3].b}), rgba(${col[0].r}, ${col[0].g}, ${col[0].b}, 0), rgb(${col[2].r}, ${col[2].g}, ${col[2].b})) rgba(${col[0].r}, ${col[0].g}, ${col[0].b}, 1); width: calc(100% / ${gamepad.w}); height: calc(100% / ${gamepad.h});" ${gamepad.anchorArray.indexOf(`${x}-${y}`) === -1 ? `draggable="true"` : ``}>${gamepad.anchorArray.indexOf(`${x}-${y}`) !== -1 ? `<div class="anchor"></div>` : ``}</div>`;
+            break;
+            default:
+              col = getColorAtPos(gamepad.colorArray, {
+                x: x,
+                y: y,
+                w: gamepad.w,
+                h: gamepad.h
+              });
+              div.innerHTML = `<div class="tile" id="tile-${x}-${y}" style="background-color: rgb(${col.r}, ${col.g}, ${col.b}); border: 1px solid rgb(${col.r}, ${col.g}, ${col.b}); width: calc(100% / ${gamepad.w} - 2px); height: calc(100% / ${gamepad.h} - 2px);" ${gamepad.anchorArray.indexOf(`${x}-${y}`) === -1 ? `draggable="true"` : ``}>${gamepad.anchorArray.indexOf(`${x}-${y}`) !== -1 ? `<div class="anchor"></div>` : ``}</div>`;
+            break;
+          }
+          document.getElementById("gamepad").appendChild(div.childNodes[0]);
+        }
+
+        let tiles = document.getElementsByClassName("tile");
+        for (let i = 0; i < tiles.length; i++) {
+          if (gamepad.anchorArray.indexOf(tiles[i].id.split("-").splice(1).join("-")) === -1) {
+            addListeners(tiles[i]);
+          }
+        }
+
+      }
+
+      async function generateGamepad(w, h, colorArray, anchors, colorMode) {
+
+        await remove(ref(db, "games/default/gamepad/tiles"));
+
+        gamepad = {
+          w: w,
+          h: h,
+          anchors: anchors,
+          colorArray: colorArray,
+          colorMode: colorMode,
+          anchorArray: [],
+          tilePositions: [],
+          minGuesses: Math.floor(Math.random() * 50 + 25),
+          tiles: []
+        };
+
+        for (let i = 0; i < w * h; i++) {
+          gamepad.tiles.push(`tile-${i % gamepad.w}-${Math.floor(i / gamepad.w)}`);
+        }
+
+        let anchorArray = [];
+
+        switch(anchors) {
+          case 0:
+            // No anchors.
+          break;
+          case 1:
+            anchorArray.push(`${Math.floor(w / 2)}-${Math.floor(h / 2)}`);
+          break;
+          default:
+            for (let x = 0; x < anchors; x++) {
+              for (let y = 0; y < anchors; y++) {
+                anchorArray.push(`${Math.floor(x / (anchors - 1) * (w - 1))}-${Math.floor(y / (anchors - 1) * (h - 1))}`);
+              }
+            }
+          break;
+        }
+
+        gamepad.anchorArray = anchorArray;
+
+        loadGamepad(true);
+
+        shuffleGamepad(gamepad.minGuesses);
+
+        gamepad.tiles = getTiles();
+
+        set(ref(db, "games/default/gamepad"), gamepad);
+
+      }
+
+      function shuffleGamepad(n) {
+
+        let i, breakout, tile1ID, tile2ID;
+
+        for (i = 0; i < n; i++) {
+          breakout = 0;
+          while (breakout < 100) {
+            tile1ID = `${Math.floor(Math.random() * gamepad.w)}-${Math.floor(Math.random() * gamepad.h)}`;
+            tile2ID = `${Math.floor(Math.random() * gamepad.w)}-${Math.floor(Math.random() * gamepad.h)}`;
+
+            if (tile1ID !== tile2ID && gamepad.anchorArray.indexOf(tile1ID) === -1 && gamepad.anchorArray.indexOf(tile2ID) === -1) {
+              swapTiles(`tile-${tile1ID}`, `tile-${tile2ID}`);
+              break;
+            }
+
+            breakout++;
+          }
+        }
+
+      }
+      function autoSolveGamepad() {
+
+        let solve = setInterval(function() {
+          singleSolve(solve);
+        }, 550);
+
+        singleSolve();
+      }
+      function singleSolve(int) {
+
+        let tiles = document.getElementsByClassName("tile");
+        for (let i = 0; i < tiles.length; i++) {
+
+          // Tile is in the wrong spot!
+          if (Number(tiles[i].id.split("-")[1]) !== i % gamepad.w || Number(tiles[i].id.split("-")[2]) !== Math.floor(i / gamepad.w)) {
+            pushAnimation(tiles[i].id, `tile-${i % gamepad.w}-${Math.floor(i / gamepad.w)}`, 2);
+            animate();
+            return;
+          }
+
+        }
+
+        if (int)
+          clearInterval(int);
+
+      }
+
+      function addListeners(el) {
+
+        el.addEventListener("dragstart", function(e) {
+          startDrag(e);
+        });
+        el.addEventListener("dragover", function(e) {
+          e.preventDefault();
+        });
+        el.addEventListener("drop", function(e) {
+          endDrag(e);
+        });
+      }
+
+      function startDrag(e, mobile) {
+
+        dragging = e.target.id;
+      }
+      function endDrag(e, mobile) {
+
+        if (!dragging)
+          return;
+
+        if (dragging === e.target.id || (new Date().getTime()) - lastMove <= 500) {
+          dragging = false;
+          return;
+        }
+
+        lastMove = new Date().getTime();
+
+        set(push(child(ref(db), "games/default/changes")), {
+          header: {
+            action: "swap",
+            uid: uid,
+            timestamp: new Date().getTime()
+          },
+          data: {
+            tile1ID: dragging,
+            tile2ID: e.target.id
+          }
+        });
+
+        let tiles = getTiles();
+        let tempIndex = tiles.indexOf(e.target.id);
+        tiles[tiles.indexOf(dragging)] = e.target.id;
+        tiles[tempIndex] = dragging;
+
+        if (tiles.length === gamepad.w * gamepad.h) {
+          set(ref(db, "games/default/gamepad/tiles"), tiles);
+        }
+
+        pushAnimation(dragging, e.target.id, animationBuffer.length > 0 ? 2 : 1);
+        animate();
+
+        dragging = false;
+      }
+
+      function animate() {
+
+        // Don't animate if there is nothing to animate, or an animation is already in progress
+        if (animationBuffer.length !== 1) {
+          return;
+        }
+
+        let animationInt = setInterval(function() {
+          singleAnimate(animationInt);
+        }, 550);
+
+        singleAnimate(animationInt);
+
+      }
+      function singleAnimate(int) {
+
+        if (animationBuffer.length === 0) {
+          clearInterval(int);
+          return;
+        }
+
+        gamepadCheckDelay = 0;
+
+        swapTiles(animationBuffer[0].fromID, animationBuffer[0].toID, animationBuffer[0].animate);
+
+        setTimeout(function() {
+
+          animationBuffer.splice(0, 1);
+
+          if (animationBuffer.length === 0)
+            clearInterval(int);
+
+          let tiles = getTiles();
+          if (tiles.length === gamepad.w * gamepad.h && Math.abs((new Date().getTime()) - lastMove) <= 1000) {
+            set(ref(db, "games/default/gamepad/tiles"), tiles);
+          }
+
+          let i;
+          for (i = 0; i < tiles.length; i++) {
+
+            if (Number(tiles[i].split("-")[1]) !== i % gamepad.w || Number(tiles[i].split("-")[2]) !== Math.floor(i / gamepad.w)) {
+              break;
+            }
+          }
+
+          if (i === tiles.length) {
+            alert("You win!"); // [TODO]
+          }
+
+        }, 510);
+
+      }
+
+      function pushAnimation(fromID, toID, animate) {
+
+        if (fromID === toID)
+          return;
+
+        animationBuffer.push({
+          fromID: fromID,
+          toID: toID,
+          animate: animate
+        });
+
+      }
+
+      function getTiles() {
+
+        let tileArray = [];
+        let tiles = document.getElementsByClassName("tile");
+        for (let i = 0; i < tiles.length; i++) {
+          if (tiles[i].id.split("-")[3] !== "temp") {
+            tileArray.push(tiles[i].id);
+          }
+        }
+
+        return tileArray;
+      }
+
+      function handleChanges(changes) {
+
+        let changesToApply = [];
+
+        for (let i in changes) {
+
+          if (appliedChanges.indexOf(i) !== -1)
+            continue;
+
+          appliedChanges.push(i);
+          changesToApply.push(changes[i]);
+
+        }
+
+        for (let i = 0; i < changesToApply.length; i++) {
+          if (changesToApply[i].header.uid === uid)
+            continue;
+
+          switch(changesToApply[i].header.action) {
+            case "swap":
+              pushAnimation(changesToApply[i].data.tile1ID, changesToApply[i].data.tile2ID, 2);
+              animate();
+            break;
+          }
+        }
+
+      }
+
+      function swapTiles(fromID, toID, animate) {
+
+        if (fromID === toID)
+          return;
+
+        /*
+
+          "animate" has 3 options:
+            0 : no animation
+            1 : only animate the "toNode" tile
+            2 : animate both tiles
+
+        */
+
+        let fromNode = document.getElementById(fromID);
+        let toNode = document.getElementById(toID);
+
+        let tempToNode, tempFromNode;
+
+        if (animate) {
+          tempToNode = toNode.parentNode.insertBefore(toNode.cloneNode(), fromNode);
+          tempToNode.id = tempToNode.id + "-temp";
+          tempToNode.style.backgroundColor = "rgb(230, 230, 230)";
+        }
+        if (animate === 2) {
+          tempFromNode = fromNode.parentNode.insertBefore(fromNode.cloneNode(), toNode);
+          tempFromNode.id = tempFromNode.id + "-temp";
+          tempFromNode.style.backgroundColor = "rgb(230, 230, 230)";
+        }
+
+        toNode.parentNode.insertBefore(toNode.cloneNode(), fromNode);
+        fromNode.parentNode.insertBefore(fromNode, toNode);
+
+        toNode.remove();
+
+        switch(animate) {
+          case 2:
+            document.getElementById(fromID).style.position = "absolute";
+            document.getElementById(fromID).style.top = tempToNode.offsetTop + "px";
+            document.getElementById(fromID).style.left = tempToNode.offsetLeft + "px";
+            document.getElementById(fromID).style.width = tempFromNode.offsetWidth + "px";
+            document.getElementById(fromID).style.height = tempFromNode.offsetHeight + "px";
+
+            setTimeout(function() {
+              document.getElementById(fromID).style.top = tempFromNode.offsetTop + "px";
+              document.getElementById(fromID).style.left = tempFromNode.offsetLeft + "px";
+              setTimeout(function() {
+                document.getElementById(fromID).style.position = "static";
+                document.getElementById(fromID).style.top = "";
+                document.getElementById(fromID).style.left = "";
+                document.getElementById(fromID).style.width = `calc(100% / ${gamepad.w}${gamepad.colorMode === "gradient" ? `` : `- 2px`})`;
+                document.getElementById(fromID).style.height = `calc(100% / ${gamepad.h}${gamepad.colorMode === "gradient" ? `` : `- 2px`})`;
+                document.getElementById(fromID + "-temp").remove();
+              }, 500);
+            }, 0);
+
+          // Passthrough case 2:
+          case 1:
+            document.getElementById(toID).style.position = "absolute";
+            if (animate === 2) {
+              document.getElementById(toID).style.top = tempFromNode.offsetTop + "px";
+              document.getElementById(toID).style.left = tempFromNode.offsetLeft + "px";
+            } else {
+              document.getElementById(toID).style.top = fromNode.offsetTop + "px";
+              document.getElementById(toID).style.left = fromNode.offsetLeft + "px";
+            }
+            document.getElementById(toID).style.width = tempToNode.offsetWidth + "px";
+            document.getElementById(toID).style.height = tempToNode.offsetHeight + "px";
+
+            setTimeout(function() {
+              document.getElementById(toID).style.top = tempToNode.offsetTop + "px";
+              document.getElementById(toID).style.left = tempToNode.offsetLeft + "px";
+              setTimeout(function() {
+                document.getElementById(toID).style.position = "static";
+                document.getElementById(toID).style.top = "";
+                document.getElementById(toID).style.left = "";
+                document.getElementById(toID).style.width = `calc(100% / ${gamepad.w}${gamepad.colorMode === "gradient" ? `` : `- 2px`})`;
+                document.getElementById(toID).style.height = `calc(100% / ${gamepad.h}${gamepad.colorMode === "gradient" ? `` : `- 2px`})`;
+                document.getElementById(toID + "-temp").remove();
+              }, 500);
+            }, 0);
+          break;
+        }
+
+        addListeners(document.getElementById(fromID));
+        addListeners(document.getElementById(toID));
+      }
+
+      function getColorAtPos(colors, pos) {
+
+        let pX = pos.x / (pos.w - 1) * (colors[0].length - 1) || 0;
+        let pY = pos.y / (pos.h - 1) * (colors.length - 1) || 0;
+
+        let tX = Math.floor(pX);
+        let tY = Math.floor(pY);
+
+        let cX = pX - tX;
+        let cY = pY - tY;
+
+        let colY1 = interpColor(colors[tY][tX], colors[tY + 1] ? colors[tY + 1][tX] : colors[tY][tX], cY);
+        let colY2 = interpColor(colors[tY][tX + 1] || colors[tY][tX], colors[tY + 1] ? (colors[tY + 1][tX + 1] || colors[tY + 1][tX]) : colors[tY][tX], cY);
+
+        return interpColor(colY1, colY2, cX);
+      }
+
+      function interpColor(color1, color2, p) {
+
+        return {
+          r: color1.r + (color2.r - color1.r) * p,
+          g: color1.g + (color2.g - color1.g) * p,
+          b: color1.b + (color2.b - color1.b) * p
+        };
+      }
+
+      function generateColorArray(w, h, d) {
+
+        let returnArray, complete = false, x, y, xo, yo, xi, yi;
+
+        while (!complete) {
+
+          returnArray = [];
+
+          for (y = 0; y < h; y++) {
+            returnArray.push([]);
+            for (x = 0; x < w; x++) {
+              returnArray[y].push({
+                r: Math.random() * 255,
+                g: Math.random() * 255,
+                b: Math.random() * 255
+              });
+            }
+          }
+
+          // Re-generate the color array if the colors are too close in color
+          complete = true;
+          loop: for (yo = 0; yo < h; yo++) {
+            for (xo = 0; xo < w; xo++) {
+
+              for (yi = 0; yi < h; yi++) {
+                for (xi = 0; xi < w; xi++) {
+                  if (!(xo === xi && yo === yi) && calculateColorDistance(returnArray[yo][xo], returnArray[yi][xi]) <= Math.pow(d, 2)) {
+                    complete = false;
+                    break loop;
+                  }
+                }
+              }
+
+            }
+          }
+
+          // Prevent infinite loops; eventually, a grid will generate
+          d -= 0.1;
+
+        }
+
+        return returnArray;
+      }
+
+      function calculateColorDistance(color1, color2) {
+        return Math.pow(color1.r - color2.r, 2) + Math.pow(color1.g - color2.g, 2) + Math.pow(color1.b - color2.b, 2);
+      }
+
+      async function getData(path, err) {
+
+        let data;
+        const dbref = ref(db);
+
+        await get(child(dbref, path)).then((snapshot) => {
+          if (!snapshot.exists())
+            return;
+
+          data = snapshot.val();
+        }).catch((error) => {
+          err(error);
+          console.error(error);
+        });
+
+        return data;
+      }
+
+      document.getElementById("newGame").addEventListener("click", function() {
+
+        let w = gamepad ? gamepad.w : 9, h = gamepad ? gamepad.h : 11, a = gamepad ? gamepad.anchors : 3, hcp = 2, vcp = 2, cs = 200, tt = gamepad ? gamepad.colorMode : "gradient";
+
+        let q1 = prompt("Would you like to change the gamepad settings?");
+        if (q1 && q1.toLowerCase() !== "n" && q1.toLowerCase() !== "no") {
+          w = Number(prompt("Enter a width for the gamepad:")) || 9;
+          h = Number(prompt("Enter a height for the gamepad:")) || 11;
+          a = Number(prompt("Enter a number of anchor points for the gamepad:")) || 3;
+
+          let q2 = prompt("Would you like to set advanced settings?");
+          if (q2 && q2.toLowerCase() !== "n" && q2.toLowerCase() !== "no") {
+            hcp = Number(prompt("Enter the number of horizontal color points to use (2 default).")) || 2;
+            vcp = Number(prompt("Enter the number of vertical color points to use (2 default).")) || 2;
+            cs = Number(prompt("Enter the minimum color separation to use (200 default).")) || 200;
+            tt = prompt(`Enter the tile type to use ("normal" or "gradient"; "gradient" default).`) || "gradient";
+          }
+        }
+
+        generateGamepad(w, h, generateColorArray(hcp, vcp, cs), a, tt);
+      });
+      document.getElementById("autoSolve").addEventListener("click", function() {
+        if (prompt("This feature has been limited because it currently is not fully implemented. Enter the password to continue:") === "S0lv3") {
+          autoSolveGamepad();
+        }
+      });
+
+    </script>
+  </body>
+</html>
