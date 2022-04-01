@@ -648,7 +648,8 @@
         if (q1 && q1.toLowerCase() !== "n" && q1.toLowerCase() !== "no") {
           w = Number(prompt("Enter a width for the gamepad:")) || 9;
           h = Number(prompt("Enter a height for the gamepad:")) || 11;
-          a = Number(prompt("Enter a number of anchor points for the gamepad:")) || 3;
+          a = prompt("Enter a number of anchor points for the gamepad:");
+          a = (a ? (Number(a) || 3) : (a === 0 ? 0 : 3));
 
           let q2 = prompt("Would you like to set advanced settings?");
           if (q2 && q2.toLowerCase() !== "n" && q2.toLowerCase() !== "no") {
