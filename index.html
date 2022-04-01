@@ -200,7 +200,7 @@
 
       }
 
-      async function generateGamepad(w, h, colorArray, anchors, colorMode) {
+      async function generateGamepad(w, h, colorArray, anchors, colorMode, scrambles) {
 
         await remove(ref(db, "games/default/gamepad/tiles"));
 
@@ -212,7 +212,7 @@
           colorMode: colorMode,
           anchorArray: [],
           tilePositions: [],
-          minGuesses: Math.floor(Math.random() * 50 + 25),
+          minGuesses: scrambles,
           tiles: []
         };
 
@@ -242,7 +242,7 @@
 
         loadGamepad(true);
 
-        shuffleGamepad(gamepad.minGuesses);
+        shuffleGamepad(scrambles);
 
         gamepad.tiles = getTiles();
 
@@ -642,7 +642,7 @@
 
       document.getElementById("newGame").addEventListener("click", function() {
 
-        let w = gamepad ? gamepad.w : 9, h = gamepad ? gamepad.h : 11, a = gamepad ? gamepad.anchors : 3, hcp = 2, vcp = 2, cs = 200, tt = gamepad ? gamepad.colorMode : "gradient";
+        let w = gamepad ? gamepad.w : 9, h = gamepad ? gamepad.h : 11, a = gamepad ? gamepad.anchors : 3, hcp = 2, vcp = 2, cs = 200, tt = gamepad ? gamepad.colorMode : "gradient", sc = Math.floor(Math.random() * 50 + 25);
 
         let q1 = prompt("Would you like to change the gamepad settings?");
         if (q1 && q1.toLowerCase() !== "n" && q1.toLowerCase() !== "no") {
@@ -653,14 +653,15 @@
 
           let q2 = prompt("Would you like to set advanced settings?");
           if (q2 && q2.toLowerCase() !== "n" && q2.toLowerCase() !== "no") {
-            hcp = Number(prompt("Enter the number of horizontal color points to use (2 default).")) || 2;
-            vcp = Number(prompt("Enter the number of vertical color points to use (2 default).")) || 2;
-            cs = Number(prompt("Enter the minimum color separation to use (200 default).")) || 200;
-            tt = prompt(`Enter the tile type to use ("normal" or "gradient"; "gradient" default).`) || "gradient";
+            hcp = Number(prompt("Enter the number of horizontal color points to use (2 default):")) || 2;
+            vcp = Number(prompt("Enter the number of vertical color points to use (2 default):")) || 2;
+            cs = Number(prompt("Enter the minimum color separation to use (200 default):")) || 200;
+            tt = prompt(`Enter the tile type to use ("normal" or "gradient"; "gradient" default):`) || "gradient";
+            sc = prompt(`Enter the number of scrambles to use (25-75 default):`) || Math.floor(Math.random() * 50 + 25);
           }
         }
 
-        generateGamepad(w, h, generateColorArray(hcp, vcp, cs), a, tt);
+        generateGamepad(w, h, generateColorArray(hcp, vcp, cs), a, tt, sc);
       });
       document.getElementById("autoSolve").addEventListener("click", function() {
         if (prompt("This feature has been limited because it currently is not fully implemented. Enter the password to continue:") === "S0lv3") {
